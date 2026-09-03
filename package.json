@@ -1,0 +1,33 @@
+{
+  "name": "psytrance-engine",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "A pure-browser, seed-driven, infinitely-generating Psytrance music engine built on the Web Audio API.",
+  "keywords": [
+    "psytrance",
+    "goa",
+    "generative-music",
+    "web-audio",
+    "audio-engine",
+    "music-generation",
+    "acid",
+    "trance"
+  ],
+  "author": "Koipoppy",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Koipoppy/PsyTranceEngine.git"
+  },
+  "homepage": "https://github.com/Koipoppy/PsyTranceEngine",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  }
+}

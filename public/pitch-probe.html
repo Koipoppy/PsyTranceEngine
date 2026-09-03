@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pitch Probe v2</title>
+<style>
+  body { background: #111; color: #eee; font: 13px/1.5 monospace; padding: 16px; }
+  table { border-collapse: collapse; margin-top: 10px; }
+  td, th { border: 1px solid #333; padding: 4px 10px; text-align: left; }
+  .ok { color: #7f7; } .bad { color: #f77; }
+  pre { background: #000; padding: 8px; }
+</style>
+</head>
+<body>
+<div id="status">analyzing...</div>
+<table id="out"><tr><th>file</th><th>hz</th><th>midi</th><th>note</th><th>conf</th><th>dur</th><th>peak</th></tr></table>
+<pre id="json"></pre>
+<script type="module">
+// maxHz: search ceiling; lp: one-pole lowpass cutoff (0 = none).
+const FILES = [
+  { f: "fs859188-psy-bass-oneshot-eb.mp3", maxHz: 400, lp: 500 },
+  { f: "fs706090-psy-bass-fs-punchy.mp3", maxHz: 400, lp: 500 },
+  { f: "fs616687-psy-bass-f2.mp3", maxHz: 400, lp: 500 },
+  { f: "fs554834-psy-bass-roll-c140.mp3", maxHz: 400, lp: 500 },
+  { f: "fs627753-acid-303-b2.mp3", maxHz: 500, lp: 600 },
+  { f: "fs467920-acid-tb03-c.mp3", maxHz: 500, lp: 600 },
+  { f: "fs612195-acid-square-slide.mp3", maxHz: 500, lp: 600 },
+  { f: "fs700382-psy-lead-robot.mp3", maxHz: 1200, lp: 0 },
+  { f: "fs668775-psy-lead-145.mp3", maxHz: 1200, lp: 0 },
+  { f: "fs829204-psy-lead-fm147.mp3", maxHz: 1200, lp: 0 },
+  { f: "fs819438-psy-oneshot-03.mp3", maxHz: 1200, lp: 0 },
+  { f: "fs162349-goa-lead-glide.mp3", maxHz: 1200, lp: 0 }
+];
+const NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+function lowpass(x, sr, cutoff) {
+  const a = 1 - Math.exp(-2 * Math.PI * cutoff / sr);
+  const y = new Float32Array(x.length);
+  let acc = 0;
+  for (let i = 0; i < x.length; i++) { acc += a * (x[i] - acc); y[i] = acc; }
+  return y;
+}
+
+function detectPitch(buf, maxHz, lp) {
+  const sr = buf.sampleRate;
+  const n = Math.min(buf.length, Math.floor(sr * 3));
+  let x = new Float32Array(n);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < n; i++) x[i] += d[i] / buf.numberOfChannels;
+  }
+  let peak = 0;
+  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(x[i]));
+  if (lp > 0) x = lowpass(x, sr, lp);
+
+  const win = Math.min(Math.floor(sr * 0.35), n);
+  let bestStart = 0, bestE = -1;
+  for (let s = 0; s + win <= n; s += Math.floor(sr * 0.05)) {
+    let e = 0;
+    for (let i = s; i < s + win; i++) e += x[i] * x[i];
+    if (e > bestE) { bestE = e; bestStart = s; }
+  }
+  const seg = x.subarray(bestStart, bestStart + win);
+
+  const minLag = Math.floor(sr / maxHz), maxLag = Math.floor(sr / 30);
+  const corrs = new Float32Array(maxLag + 1);
+  let maxCorr = 0;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let c = 0, e1 = 0, e2 = 0;
+    for (let i = 0; i + lag < win; i++) {
+      c += seg[i] * seg[i + lag];
+      e1 += seg[i] * seg[i];
+      e2 += seg[i + lag] * seg[i + lag];
+    }
+    const norm = c / Math.sqrt(e1 * e2 + 1e-12);
+    corrs[lag] = norm;
+    if (norm > maxCorr) maxCorr = norm;
+  }
+  // Pick the LOWEST-frequency lag (largest lag) whose corr is within 0.92 of max
+  // but still >= 0.6 absolute — avoids harmonic lock, rejects subharmonic noise.
+  const threshold = Math.max(0.6, maxCorr * 0.92);
+  let bestLag = -1;
+  for (let lag = maxLag; lag >= minLag; lag--) {
+    if (corrs[lag] >= threshold) { bestLag = lag; break; }
+  }
+  if (bestLag < 0) bestLag = minLag + Array.from(corrs.subarray(minLag)).indexOf(maxCorr);
+  const hz = sr / bestLag;
+  return { hz, conf: corrs[bestLag], peak };
+}
+
+const ctx = new AudioContext();
+const rows = [];
+for (const { f, maxHz, lp } of FILES) {
+  try {
+    const res = await fetch("/samples/" + f, { cache: "force-cache" });
+    const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+    const p = detectPitch(buf, maxHz, lp);
+    const m = Math.round(69 + 12 * Math.log2(p.hz / 440));
+    rows.push({ file: f, hz: +p.hz.toFixed(1), midi: m, name: NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1), conf: +p.conf.toFixed(3), dur: +buf.duration.toFixed(2), peak: +p.peak.toFixed(3) });
+  } catch (e) {
+    rows.push({ file: f, error: String(e) });
+  }
+}
+const out = document.getElementById("out");
+for (const r of rows) {
+  const tr = document.createElement("tr");
+  const cls = r.conf !== undefined && r.conf >= 0.8 ? "ok" : "bad";
+  tr.innerHTML = `<td>${r.file}</td><td>${r.hz ?? "-"}</td><td class="${cls}">${r.midi ?? "-"}</td><td>${r.name ?? "-"}</td><td>${r.conf ?? "-"}</td><td>${r.dur ?? "-"}</td><td>${r.peak ?? "-"}</td>`;
+  out.appendChild(tr);
+}
+document.getElementById("json").textContent = JSON.stringify(rows, null, 1);
+document.getElementById("status").textContent = "done (" + rows.length + " files)";
+</script>
+</body>
+</html>
