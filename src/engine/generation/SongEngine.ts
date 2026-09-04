@@ -100,6 +100,11 @@ export class SongEngine {
     this.absurdity = clamp(v, 0, 1);
   }
 
+  /** Absurdity knob (0..1) — exposed for the visualizer. */
+  absurdityNow(): number {
+    return this.absurdity;
+  }
+
   currentSection(): SectionName {
     return this.section;
   }

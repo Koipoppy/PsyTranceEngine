@@ -111,9 +111,23 @@ export class Engine {
     this.song.setAbsurdity(v);
   }
 
+  /** Current effective brightness (user offset or style default) for the visualizer. */
+  brightnessNow(): number {
+    return this.brightnessOverride ?? STYLES[this.styleName].brightness;
+  }
+
+  /** Current absurdity knob for the visualizer. */
+  absurdityNow(): number {
+    return this.song.absurdityNow();
+  }
+
+  private brightnessOverride: number | null = null;
+
   setBrightness(v: number | null): void {
+    this.brightnessOverride = v;
     this.song.setBrightness(v);
   }
+
   setGrit(v: number | null): void {
     this.song.setGrit(v);
   }
